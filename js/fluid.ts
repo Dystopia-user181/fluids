@@ -10,7 +10,7 @@ function getSegmentKey(pos: Vector3) {
 		Math.round((pos.z + 30) / influence)) & 4095;
 }
 
-const targetDensity = 0.7;
+const targetDensity = 0.7, selfDensity = 0.5;
 
 class FluidHandler {
 	n = 0;
@@ -27,9 +27,9 @@ class FluidHandler {
 	constructor(number: number) {
 		this.n = number;
 		for (let i = 0; i < this.n; i++) {
-			this.r.push(new Vector3(Math.random() * 12 - 6, Math.random() * 12 - 6, 0));
+			this.r.push(new Vector3(Math.random() * 8 - 4, Math.random() * 8 - 4, Math.random() * 8 - 4));
 			this.v.push(new Vector3(0, 0, 0));
-			this.densities.push(0.5);
+			this.densities.push(selfDensity);
 			this.gradients.push(new Vector3(0, 0, 0));
 			this.forcesOn.push([]);
 			this.forcesBy.push([]);
@@ -48,7 +48,7 @@ class FluidHandler {
 	}
 
 	calcDensity(u: number, dt: number) {
-		this.densities[u] = 0.5;
+		this.densities[u] = selfDensity;
 		const effectivePos = this.r[u].clone().add(this.v[u].clone().multiplyScalar(dt));
 		for (let i = -1; i < 2; i++) {
 			for (let j = -1; j < 2; j++) {
@@ -84,7 +84,7 @@ class FluidHandler {
 	finalisePressureGrads() {
 		for (let i = 0; i < this.n; i++) {
 			// cole equation: p is proportional to (rho / rho_0)^7 - 1
-			const u1 = this.densities[i] / targetDensity - 1;
+			const u1 = (this.densities[i] - selfDensity) / targetDensity;
 			const u2 = u1 * u1;
 			const densityMul = u2 * u2 * u2;
 			let v;
@@ -151,4 +151,5 @@ class FluidHandler {
 
 export const Simulation = new FluidHandler(1000);
 
+// @ts-ignore
 window.Simulation = Simulation;

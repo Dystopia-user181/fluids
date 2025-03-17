@@ -13,11 +13,12 @@ document.body.appendChild(renderer.domElement);
 
 
 const dropletRadius = 0.08;
-const fluidShape = new THREE.SphereGeometry(dropletRadius, 16, 12);
-const fluidColour = new THREE.MeshBasicMaterial({ color: 0x0f659e });
-const spheres = Simulation.r.map(() => new THREE.Mesh(fluidShape, fluidColour));
-for (const s of spheres) {
-	scene.add(s);
+const spheres: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>[] = [];
+for (let i = 0; i < Simulation.n; i++) {
+	const fluidShape = new THREE.SphereGeometry(dropletRadius, 16, 12);
+	const fluidColour = new THREE.MeshBasicMaterial({ color: 0x0f659e });
+	spheres.push(new THREE.Mesh(fluidShape, fluidColour));
+	scene.add(spheres[spheres.length - 1]);
 }
 
 const geometry = new THREE.PlaneGeometry(10000, 10000);
@@ -33,7 +34,10 @@ function animate(newTime: number) {
 	time = newTime;
 	Simulation.tick(dt);
 	for (let i = 0; i < Simulation.n; i++) {
+		const d = Simulation.densities[i] * 2 - 1.4;
+		const hue = 204 / (1 + d * d * d);
 		spheres[i].position.copy(Simulation.r[i]);
+		spheres[i].material.color.setHSL(hue / 360, 0.83, 0.34);
 	}
 	renderer.render(scene, camera);
 }
