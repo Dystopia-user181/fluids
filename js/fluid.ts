@@ -1,13 +1,13 @@
 import { Vector3 } from "three";
 
 export const worldBottom = -10;
-const worldWidth = 4;
+const worldWidth = 6;
 const restitution = 0;
 const influence = 0.5;
 function getSegmentKey(pos: Vector3) {
-	return ((Math.floor((pos.x + worldWidth + 30) / influence) << 14) +
-		(Math.floor((pos.y + worldWidth + 30) / influence) << 7) +
-		Math.floor((pos.z + worldWidth + 30) / influence)) & 2097151;
+	return ((Math.round((pos.x + 30) / influence) << 8) +
+		(Math.round((pos.y + 30) / influence) << 4) +
+		Math.round((pos.z + 30) / influence)) & 4095;
 }
 
 const targetDensity = 0.7;
@@ -16,20 +16,20 @@ class FluidHandler {
 	n = 0;
 	r: Vector3[] = [];
 	v: Vector3[] = [];
-	segmentedR = Array(2097152).fill(0).map(() => new Set<number>());
+	segmentedR = Array(4096).fill(0).map(() => [] as number[]);
 
 	densities: number[] = [];
 	gradients: Vector3[] = [];
-	pressureForceStrength = 0.01;
+	pressureForceStrength = 0.005;
 
 	constructor(number: number) {
 		this.n = number;
 		for (let i = 0; i < this.n; i++) {
-			this.r.push(new Vector3(Math.random() * 4 - 2, Math.random() * 4 - 2, 0));
+			this.r.push(new Vector3(Math.random() * 8 - 4, Math.random() * 8 - 4, 0));
 			this.v.push(new Vector3(0, 0, 0));
 			this.densities.push(0.5);
 			this.gradients.push(new Vector3(0, 0, 0));
-			this.segmentedR[getSegmentKey(this.r[i])].add(i);
+			this.segmentedR[getSegmentKey(this.r[i])].push(i);
 		}
 	}
 
@@ -38,9 +38,8 @@ class FluidHandler {
 	}
 
 	gravity(i: number) {
-		return new Vector3(Math.sin(Date.now() / 1500) * 0.003, -0.01, 0);
 		const r = this.r[i].clone();
-		return r.multiplyScalar(-Math.min(0.1 / (r.length() ** 3), 10 / r.length()));
+		return r.multiplyScalar(-Math.min(0.03 / (r.length() ** 3), 1 / r.length()));
 	}
 
 	calcDensity(u: number, dt: number) {
@@ -49,13 +48,24 @@ class FluidHandler {
 		for (let i = -1; i < 2; i++) {
 			for (let j = -1; j < 2; j++) {
 				for (let k = -1; k < 2; k++) {
-					const newPos = effectivePos.clone().add(new Vector3(i, j, k).multiplyScalar(influence));
-					for (const j of this.segmentedR[getSegmentKey(newPos)]) {
-						const dr = this.r[j].clone().sub(effectivePos);
-						const magDr = dr.length();
+					const newPos = new Vector3(
+						effectivePos.x + i * influence,
+						effectivePos.y + j * influence,
+						effectivePos.z + k * influence
+					);
+					let v;
+					for (v of this.segmentedR[getSegmentKey(newPos)]) {
 						// eslint-disable-next-line max-depth
-						if (magDr <= 0.0001 || magDr > 0.5) continue;
-						const density = (0.5 - 2 * magDr + 2 * magDr * magDr);
+						if (v === u) continue;
+						const dr = new Vector3(
+							this.r[v].x - effectivePos.x,
+							this.r[v].y - effectivePos.y,
+							this.r[v].z - effectivePos.z,
+						);
+						const magDrSq = dr.x * dr.x + dr.y * dr.y + dr.z * dr.z;
+						// eslint-disable-next-line max-depth
+						if (magDrSq > 0.25) continue;
+						const density = (0.5 - 2 * Math.sqrt(magDrSq) + 2 * magDrSq);
 						this.densities[u] += density;
 					}
 				}
@@ -65,21 +75,34 @@ class FluidHandler {
 
 	calcPressureGrad(u: number, dt: number) {
 		const effectivePos = this.r[u].clone().add(this.v[u].clone().multiplyScalar(dt));
+		// cole equation: p is proportional to (rho / rho_0)^7 - 1
+		const u1 = this.densities[u] / targetDensity - 1;
+		const u2 = u1 * u1;
+		const densityMul = u2 * u2 * u2;
 		for (let i = -1; i < 2; i++) {
 			for (let j = -1; j < 2; j++) {
 				for (let k = -1; k < 2; k++) {
-					const newPos = effectivePos.clone().add(new Vector3(i, j, k).multiplyScalar(influence));
-					for (const j of this.segmentedR[getSegmentKey(newPos)]) {
-						const dr = this.r[j].clone().sub(effectivePos);
-						const magDr = dr.length();
+					const newPos = new Vector3(
+						effectivePos.x + i * influence,
+						effectivePos.y + j * influence,
+						effectivePos.z + k * influence
+					);
+					let v;
+					for (v of this.segmentedR[getSegmentKey(newPos)]) {
 						// eslint-disable-next-line max-depth
-						if (magDr === 0 || magDr > 0.5) continue;
-						// cole equation: p is proportional to (rho / rho_0)^7 - 1
-						dr.normalize().multiplyScalar(-2 + 4 * magDr);
-						this.gradients[u].add(dr.multiplyScalar(
-							Math.min(this.densities[u] / targetDensity - 1, 3) ** 3
-						));
-						this.gradients[j].add(dr.multiplyScalar(-1));
+						if (v === u) continue;
+						const dr = new Vector3(
+							this.r[v].x - effectivePos.x,
+							this.r[v].y - effectivePos.y,
+							this.r[v].z - effectivePos.z,
+						);
+						const magDrSq = dr.x * dr.x + dr.y * dr.y + dr.z * dr.z;
+						// eslint-disable-next-line max-depth
+						if (magDrSq > 0.25) continue;
+						// This is equivalent to dr.normalise().mul(grad density)
+						dr.multiplyScalar((4 - 2 / Math.sqrt(magDrSq)) * densityMul);
+						this.gradients[u].add(dr);
+						this.gradients[v].sub(dr);
 					}
 				}
 			}
@@ -133,14 +156,14 @@ class FluidHandler {
 			}
 			const newR = getSegmentKey(this.r[i]);
 			if (prevR !== newR) {
-				this.segmentedR[prevR].delete(i);
-				this.segmentedR[newR].add(i);
+				this.segmentedR[prevR].splice(this.segmentedR[prevR].indexOf(i), 1);
+				this.segmentedR[newR].push(i);
 			}
 			this.v[i].multiplyScalar(0.7 ** dt);
 		}
 	}
 }
 
-export const Simulation = new FluidHandler(500);
+export const Simulation = new FluidHandler(1000);
 
 window.Simulation = Simulation;
