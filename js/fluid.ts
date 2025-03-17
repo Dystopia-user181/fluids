@@ -20,15 +20,19 @@ class FluidHandler {
 
 	densities: number[] = [];
 	gradients: Vector3[] = [];
-	pressureForceStrength = 0.005;
+	forcesOn: Vector3[][] = [];
+	forcesBy: Vector3[][] = [];
+	pressureForceStrength = 0.07;
 
 	constructor(number: number) {
 		this.n = number;
 		for (let i = 0; i < this.n; i++) {
-			this.r.push(new Vector3(Math.random() * 8 - 4, Math.random() * 8 - 4, 0));
+			this.r.push(new Vector3(Math.random() * 12 - 6, Math.random() * 12 - 6, 0));
 			this.v.push(new Vector3(0, 0, 0));
 			this.densities.push(0.5);
 			this.gradients.push(new Vector3(0, 0, 0));
+			this.forcesOn.push([]);
+			this.forcesBy.push([]);
 			this.segmentedR[getSegmentKey(this.r[i])].push(i);
 		}
 	}
@@ -38,8 +42,9 @@ class FluidHandler {
 	}
 
 	gravity(i: number) {
+		// return new Vector3(0, -0.01, 0);
 		const r = this.r[i].clone();
-		return r.multiplyScalar(-Math.min(0.03 / (r.length() ** 3), 1 / r.length()));
+		return r.multiplyScalar(-Math.min(0.05 / (r.length() ** 3), 1));
 	}
 
 	calcDensity(u: number, dt: number) {
@@ -67,45 +72,30 @@ class FluidHandler {
 						if (magDrSq > 0.25) continue;
 						const density = (0.5 - 2 * Math.sqrt(magDrSq) + 2 * magDrSq);
 						this.densities[u] += density;
+						dr.multiplyScalar(4 - 2 / Math.sqrt(magDrSq));
+						this.forcesOn[u].push(dr);
+						this.forcesBy[v].push(dr);
 					}
 				}
 			}
 		}
 	}
 
-	calcPressureGrad(u: number, dt: number) {
-		const effectivePos = this.r[u].clone().add(this.v[u].clone().multiplyScalar(dt));
-		// cole equation: p is proportional to (rho / rho_0)^7 - 1
-		const u1 = this.densities[u] / targetDensity - 1;
-		const u2 = u1 * u1;
-		const densityMul = u2 * u2 * u2;
-		for (let i = -1; i < 2; i++) {
-			for (let j = -1; j < 2; j++) {
-				for (let k = -1; k < 2; k++) {
-					const newPos = new Vector3(
-						effectivePos.x + i * influence,
-						effectivePos.y + j * influence,
-						effectivePos.z + k * influence
-					);
-					let v;
-					for (v of this.segmentedR[getSegmentKey(newPos)]) {
-						// eslint-disable-next-line max-depth
-						if (v === u) continue;
-						const dr = new Vector3(
-							this.r[v].x - effectivePos.x,
-							this.r[v].y - effectivePos.y,
-							this.r[v].z - effectivePos.z,
-						);
-						const magDrSq = dr.x * dr.x + dr.y * dr.y + dr.z * dr.z;
-						// eslint-disable-next-line max-depth
-						if (magDrSq > 0.25) continue;
-						// This is equivalent to dr.normalise().mul(grad density)
-						dr.multiplyScalar((4 - 2 / Math.sqrt(magDrSq)) * densityMul);
-						this.gradients[u].add(dr);
-						this.gradients[v].sub(dr);
-					}
-				}
-			}
+	finalisePressureGrads() {
+		for (let i = 0; i < this.n; i++) {
+			// cole equation: p is proportional to (rho / rho_0)^7 - 1
+			const u1 = this.densities[i] / targetDensity - 1;
+			const u2 = u1 * u1;
+			const densityMul = u2 * u2 * u2;
+			let v;
+			for (v of this.forcesBy[i]) v.multiplyScalar(densityMul);
+		}
+		for (let i = 0; i < this.n; i++) {
+			let v;
+			for (v of this.forcesBy[i]) this.gradients[i].sub(v);
+			for (v of this.forcesOn[i]) this.gradients[i].add(v);
+			this.forcesBy[i] = [];
+			this.forcesOn[i] = [];
 		}
 	}
 
@@ -121,19 +111,14 @@ class FluidHandler {
 	}
 
 	_tick(dt: number) {
-		this.gradients.map(() => new Vector3(0, 0, 0));
+		this.gradients = this.gradients.map(() => new Vector3(0, 0, 0));
 		for (let i = 0; i < this.n; i++) {
 			this.calcDensity(i, dt);
 		}
-		for (let i = 0; i < this.n; i++) {
-			this.calcPressureGrad(i, dt);
-		}
-		const testThing = new Vector3(0, 0, 0);
-		for (const g of this.gradients) testThing.add(g);
-		// console.log(testThing)
+		this.finalisePressureGrads();
 		for (let i = 0; i < this.n; i++) {
 			this.v[i].add(this.gravity(i).multiplyScalar(dt));
-			this.v[i].add(this.gradients[i].multiplyScalar(dt * this.pressureForceStrength));
+			this.v[i].add(this.gradients[i].clone().multiplyScalar(dt * this.pressureForceStrength));
 			const prevR = getSegmentKey(this.r[i]);
 			this.r[i].add(this.v[i]);
 			if (this.r[i].y < worldBottom) {
@@ -159,7 +144,7 @@ class FluidHandler {
 				this.segmentedR[prevR].splice(this.segmentedR[prevR].indexOf(i), 1);
 				this.segmentedR[newR].push(i);
 			}
-			this.v[i].multiplyScalar(0.7 ** dt);
+			this.v[i].multiplyScalar(0.9 ** dt);
 		}
 	}
 }
