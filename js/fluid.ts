@@ -29,6 +29,8 @@ class FluidHandler {
 
 	pressureForceStrength = 0.07;
 
+	timeElapsed = 0;
+
 	constructor(number: number) {
 		this.n = number;
 		for (let i = 0; i < this.n; i++) {
@@ -47,8 +49,12 @@ class FluidHandler {
 
 	gravity(i: number) {
 		// return new Vector3(0, -0.01, 0);
-		const r = this.r[i].clone();
-		return r.multiplyScalar(-Math.min(0.05 / (r.length() ** 3), 1));
+		const phase = this.timeElapsed * 0.0609;
+		const r = this.r[i].clone().add(new Vector3(2 * Math.cos(phase), 2 * Math.sin(phase), 0));
+		const g1 = r.clone().multiplyScalar(-Math.min(0.1 / (r.lengthSq() ** 1.5), 1));
+		const r2 = r.sub(new Vector3(4 * Math.cos(phase), 4 * Math.sin(phase), 0));
+		const g2 = r2.clone().multiplyScalar(-Math.min(0.1 / (r2.lengthSq() ** 1.5), 1));
+		return g1.add(g2);
 	}
 
 	calcDensity(u: number, dt: number) {
@@ -104,7 +110,7 @@ class FluidHandler {
 
 	tick(dt: number) {
 		const _dt = Math.min(dt, 0.2);
-		const n = Math.ceil(_dt / 0.01);
+		const n = Math.ceil(_dt / 0.02);
 
 		for (let i = 0; i < n; i++) {
 			// let prev = calledTimes;
@@ -114,6 +120,7 @@ class FluidHandler {
 	}
 
 	_tick(dt: number) {
+		this.timeElapsed += dt;
 		this.gradients = this.gradients.map(() => new Vector3(0, 0, 0));
 		for (let i = 0; i < this.n; i++) {
 			this.calcDensity(i, dt);
