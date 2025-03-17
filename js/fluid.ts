@@ -19,9 +19,14 @@ class FluidHandler {
 	segmentedR = Array(4096).fill(0).map(() => [] as number[]);
 
 	densities: number[] = [];
+	densityMultipliers: number[] = [];
 	gradients: Vector3[] = [];
-	forcesOn: Vector3[][] = [];
-	forcesBy: Vector3[][] = [];
+	forces = {
+		mag: [] as Vector3[],
+		giver: [] as number[],
+		receiver: [] as number[],
+	};
+
 	pressureForceStrength = 0.07;
 
 	constructor(number: number) {
@@ -30,9 +35,8 @@ class FluidHandler {
 			this.r.push(new Vector3(Math.random() * 8 - 4, Math.random() * 8 - 4, Math.random() * 8 - 4));
 			this.v.push(new Vector3(0, 0, 0));
 			this.densities.push(selfDensity);
+			this.densityMultipliers.push(0);
 			this.gradients.push(new Vector3(0, 0, 0));
-			this.forcesOn.push([]);
-			this.forcesBy.push([]);
 			this.segmentedR[getSegmentKey(this.r[i])].push(i);
 		}
 	}
@@ -73,30 +77,29 @@ class FluidHandler {
 						const density = (0.5 - 2 * Math.sqrt(magDrSq) + 2 * magDrSq);
 						this.densities[u] += density;
 						dr.multiplyScalar(4 - 2 / Math.sqrt(magDrSq));
-						this.forcesOn[u].push(dr);
-						this.forcesBy[v].push(dr);
+						this.forces.mag.push(dr);
+						this.forces.receiver.push(u);
+						this.forces.giver.push(v);
 					}
 				}
 			}
 		}
+		const u1 = (this.densities[u] - selfDensity) / targetDensity;
+		const u2 = u1 * u1;
+		this.densityMultipliers[u] = u2 * u2 * u2;
 	}
 
 	finalisePressureGrads() {
-		for (let i = 0; i < this.n; i++) {
-			// cole equation: p is proportional to (rho / rho_0)^7 - 1
-			const u1 = (this.densities[i] - selfDensity) / targetDensity;
-			const u2 = u1 * u1;
-			const densityMul = u2 * u2 * u2;
-			let v;
-			for (v of this.forcesBy[i]) v.multiplyScalar(densityMul);
+		const nForces = this.forces.mag.length;
+		for (let i = 0; i < nForces; i++) {
+			this.gradients[this.forces.receiver[i]].add(this.forces.mag[i].multiplyScalar(
+				this.densityMultipliers[this.forces.receiver[i]]
+			));
+			this.gradients[this.forces.giver[i]].sub(this.forces.mag[i]);
 		}
-		for (let i = 0; i < this.n; i++) {
-			let v;
-			for (v of this.forcesBy[i]) this.gradients[i].sub(v);
-			for (v of this.forcesOn[i]) this.gradients[i].add(v);
-			this.forcesBy[i] = [];
-			this.forcesOn[i] = [];
-		}
+		this.forces.mag = [];
+		this.forces.giver = [];
+		this.forces.receiver = [];
 	}
 
 	tick(dt: number) {
