@@ -45,7 +45,7 @@
 
 		"@typescript-eslint/no-explicit-any": "off",
 		"@typescript-eslint/ban-ts-comment": "off",
-		"@typescript-eslint/no-unused-vars": ["error"],
+		"@typescript-eslint/no-unused-vars": "error",
 
 		"@typescript-eslint/func-call-spacing": "error",
 		"import/prefer-default-export": "off",
@@ -72,7 +72,7 @@
 		"no-console": "warn",
 		"no-template-curly-in-string": "warn",
 		"array-callback-return": "error",
-		"complexity": "warn",
+		"complexity": "off",
 		"consistent-return": "error",
 		"dot-location": [
 			"error",
