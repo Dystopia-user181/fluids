@@ -2,7 +2,7 @@ import { Vector3 } from "three";
 
 export const worldBottom = -10;
 const worldWidth = 6;
-const restitution = 0;
+const restitution = 0.7;
 const influence = 0.5;
 function getSegmentKey(pos: Vector3) {
 	return ((Math.round((pos.x + 30) / influence) << 8) +
@@ -15,7 +15,6 @@ const targetDensity = 0.75, selfDensity = 0.5;
 class FluidHandler {
 	n = 0;
 	r: Vector3[] = [];
-	projectedR: Vector3[] = [];
 	v: Vector3[] = [];
 	segmentedR = Array(4096).fill(0).map(() => [] as number[]);
 
@@ -29,15 +28,15 @@ class FluidHandler {
 	};
 
 	pressureForceStrength = 3;
-	viscosity = 0.4;
+	viscosity = 10;
 
 	timeElapsed = 0;
+	interactionCounter = 0;
 
 	constructor(number: number) {
 		this.n = number;
 		for (let i = 0; i < this.n; i++) {
 			this.r.push(new Vector3(Math.random() * 12 - 6, Math.random() * 12 - 6, 0));
-			this.projectedR.push(new Vector3(Math.random() * 12 - 6, Math.random() * 12 - 6, 0));
 			this.v.push(new Vector3(0, 0, 0));
 			this.densities.push(selfDensity);
 			this.gradP.push(new Vector3(0, 0, 0));
@@ -51,8 +50,9 @@ class FluidHandler {
 	}
 
 	gravity(i: number) {
-		const lengthSq = this.r[i].x * this.r[i].x + 3 * (this.r[i].y + worldWidth) * (this.r[i].y + worldWidth);
-		const convection = new Vector3(0, 22 * Math.exp(-lengthSq), 0);
+		return new Vector3(0, -2, 0);
+		const lengthSq = this.r[i].x * this.r[i].x + (this.r[i].y + worldWidth) * (this.r[i].y + worldWidth);
+		const convection = new Vector3(0, 20 * Math.exp(-lengthSq), 0);
 		return new Vector3(0, -2, 0).add(convection);
 		const phase = this.timeElapsed * 0.0609;
 		const r = this.r[i].clone().add(new Vector3(2 * Math.cos(phase), 2 * Math.sin(phase), 0));
@@ -70,22 +70,23 @@ class FluidHandler {
 			for (let j = -1; j < 2; j++) {
 				for (let k = -1; k < 2; k++) {
 					const newPos = new Vector3(
-						this.projectedR[u].x + i * influence,
-						this.projectedR[u].y + j * influence,
-						this.projectedR[u].z + k * influence
+						this.r[u].x + i * influence,
+						this.r[u].y + j * influence,
+						this.r[u].z + k * influence
 					);
 					let v;
 					for (v of this.segmentedR[getSegmentKey(newPos)]) {
 						// eslint-disable-next-line max-depth
 						if (v === u) continue;
 						const dr = new Vector3(
-							this.projectedR[v].x - this.projectedR[u].x,
-							this.projectedR[v].y - this.projectedR[u].y,
-							this.projectedR[v].z - this.projectedR[u].z,
+							this.r[v].x - this.r[u].x,
+							this.r[v].y - this.r[u].y,
+							this.r[v].z - this.r[u].z,
 						);
-						const magDrSq = dr.x * dr.x + dr.y * dr.y + dr.z * dr.z;
+						const magDrSq = dr.lengthSq();
 						// eslint-disable-next-line max-depth
-						if (magDrSq > 0.25) continue;
+						if (magDrSq < 1e-15 || magDrSq > 0.25) continue;
+						this.interactionCounter++;
 						const density = (0.5 - 2 * Math.sqrt(magDrSq) + 2 * magDrSq);
 						this.densities[u] += density;
 						this.forces.mag.push(dr.multiplyScalar(4 - 2 / Math.sqrt(magDrSq)));
@@ -133,12 +134,10 @@ class FluidHandler {
 	}
 
 	_tick(dt: number) {
+		this.interactionCounter = 0;
 		this.timeElapsed += dt;
 		this.gradP = this.gradP.map(() => new Vector3(0, 0, 0));
 		this.lapV = this.lapV.map(() => new Vector3(0, 0, 0));
-		for (let i = 0; i < this.n; i++) {
-			this.projectedR[i] = this.r[i].clone().add(this.v[i].clone().multiplyScalar(dt));
-		}
 		for (let i = 0; i < this.n; i++) {
 			this.calcDensity(i);
 		}
@@ -154,18 +153,18 @@ class FluidHandler {
 				this.v[i].y = -this.v[i].y * restitution;
 			}
 			if (Math.abs(this.r[i].x) > worldWidth) {
-				this.r[i].x = Math.sign(this.r[i].x) * worldWidth;
-				this.v[i].x *= -0.4;
+				this.r[i].x = Math.sign(this.r[i].x) * 2 * worldWidth - this.r[i].x;
+				this.v[i].x *= -restitution;
 				/* this.v[i].x = this.v[i].x * (0.04 ** dt) -
 					Math.sign(this.r[i].x) * (Math.abs(this.r[i].x) - worldWidth) * dt; */
 			}
 			if (Math.abs(this.r[i].y) > worldWidth) {
-				this.r[i].y = Math.sign(this.r[i].y) * worldWidth;
-				this.v[i].y *= -0.4;
+				this.r[i].y = Math.sign(this.r[i].y) * 2 * worldWidth - this.r[i].y;
+				this.v[i].y *= -restitution;
 			}
 			if (Math.abs(this.r[i].z) > worldWidth) {
-				this.r[i].z = Math.sign(this.r[i].z) * worldWidth;
-				this.v[i].z *= -0.4;
+				this.r[i].z = Math.sign(this.r[i].z) * 2 * worldWidth - this.r[i].z;
+				this.v[i].z *= -restitution;
 			}
 			const newR = getSegmentKey(this.r[i]);
 			if (prevR !== newR) {
@@ -176,7 +175,7 @@ class FluidHandler {
 	}
 }
 
-export const Simulation = new FluidHandler(2000);
+export const Simulation = new FluidHandler(3000);
 
 // @ts-ignore
 window.Simulation = Simulation;
