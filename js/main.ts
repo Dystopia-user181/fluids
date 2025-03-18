@@ -28,17 +28,22 @@ plane.position.set(0, worldBottom, 0);
 plane.rotation.x += Math.PI / 2;
 scene.add(plane);
 
+const ticks = Array(30).fill(0.0166666) as number[];
 let time = 0;
 function animate(newTime: number) {
 	const dt = (newTime - time) / 1000;
+	ticks.shift();
+	ticks.push(dt);
 	time = newTime;
 	Simulation.tick(dt);
 	for (let i = 0; i < Simulation.n; i++) {
-		const d = Simulation.densities[i] * 2 - 1.4;
-		const hue = 204 / (1 + d * d * d);
+		const d = Simulation.densities[i] * 1.2 - 0.9;
+		const hue = 204 / (1 + d * d * d * d * d * d);
 		spheres[i].position.copy(Simulation.r[i]);
 		spheres[i].material.color.setHSL(hue / 360, 0.83, 0.34);
 	}
 	renderer.render(scene, camera);
+	(document.getElementById("fps-text") as HTMLDivElement).innerText =
+		`fps: ${(30 / ticks.reduce((a, b) => a + b)).toFixed(2)}`;
 }
 renderer.setAnimationLoop(animate);
