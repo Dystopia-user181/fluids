@@ -46,4 +46,5 @@ function animate(newTime: number) {
 	(document.getElementById("fps-text") as HTMLDivElement).innerText =
 		`fps: ${(30 / ticks.reduce((a, b) => a + b)).toFixed(2)}`;
 }
-renderer.setAnimationLoop(animate);
+
+window.addEventListener("keypress", () => renderer.setAnimationLoop(animate));
