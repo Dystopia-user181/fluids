@@ -4,10 +4,17 @@ export const worldBottom = -10;
 const worldWidth = 7;
 const restitution = 0.7;
 const influence = 0.5;
+function interLeave3(input: number) {
+	let x = input;
+	x = (x | x << 8) & 0xf00f00f00f00f;
+	x = (x | x << 4) & 0x30c30c30c30c3;
+	x = (x | x << 2) & 0x0249249249249;
+	return x;
+}
 function getSegmentKey(pos: Vector3) {
-	return ((Math.round((pos.x + 30) / influence) << 8) +
-		(Math.round((pos.y + 30) / influence) << 4) +
-		Math.round((pos.z + 30) / influence)) & 4095;
+	return (interLeave3(Math.round((pos.x + 10) / influence)) +
+		(interLeave3(Math.round((pos.y + 10) / influence)) << 1) +
+		(interLeave3(Math.round((pos.z + 10) / influence)) << 2)) & 4095;
 }
 
 const targetDensity = 0.75, selfDensity = 0.5;
