@@ -1,7 +1,7 @@
 import { Vector3 } from "three";
 
-export const worldBottom = -10;
-const worldWidth = 7;
+export const worldBottom = -12;
+const worldWidth = 12;
 const restitution = 0.1;
 const influence = 0.5;
 function interLeave3(input: number) {
@@ -31,8 +31,8 @@ class FluidHandler {
 	lapV: Vector3[] = [];
 
 	pressureForceStrength = 3;
-	viscosity = 2;
-	tension = 3;
+	viscosity = 3;
+	tension = 10;
 
 	timeElapsed = 0;
 	interactionCounter = 0;
@@ -40,7 +40,7 @@ class FluidHandler {
 	constructor(number: number) {
 		this.n = number;
 		for (let i = 0; i < this.n; i++) {
-			this.r.push(new Vector3(Math.random() * 7 - 7, Math.random() * 7 - 7, 0));
+			this.r.push(new Vector3(Math.random() * 18 - 9, Math.random() * 7 - 12, 0));
 			this.v.push(new Vector3(0, 0, 0));
 			this.densities.push(selfDensity);
 			this.gradP.push(new Vector3(0, 0, 0));
@@ -98,8 +98,8 @@ class FluidHandler {
 
 	gravity(i: number) {
 		//return new Vector3(0, -2, 0);
-		const lengthSq = this.r[i].x * this.r[i].x + (this.r[i].y + worldWidth) * (this.r[i].y + worldWidth);
-		const convection = new Vector3(0, 20 * Math.exp(-lengthSq), 0);
+		const lengthSq = this.r[i].x * this.r[i].x + 0.07 * (this.r[i].y + worldWidth) * (this.r[i].y + worldWidth);
+		const convection = new Vector3(0, 30 * Math.exp(-2 * lengthSq), 0);
 		return new Vector3(0, -2, 0).add(convection);
 		const phase = this.timeElapsed * 0.0609;
 		const r = this.r[i].clone().add(new Vector3(2 * Math.cos(phase), 2 * Math.sin(phase), 0));
@@ -123,6 +123,7 @@ class FluidHandler {
 			const corrR = sortedIds.slice(chunkBegins, chunkEnds).map(x => this.r[x].clone());
 			const corrV = sortedIds.slice(chunkBegins, chunkEnds).map(x => this.v[x].clone());
 			const lapV = corrR.map(() => new Vector3());
+			const tensions = corrR.map(() => new Vector3());
 			const forcesMag = [];
 			const forcesTo = [];
 			const forcesBy = [];
@@ -146,8 +147,7 @@ class FluidHandler {
 						dry,
 						drz,
 					);
-					this.gradP[u].add(dr.clone().multiplyScalar(this.tension));
-					this.gradP[v].sub(dr.clone().multiplyScalar(this.tension));
+					tensions[i - chunkBegins].add(dr.clone());
 					this.interactionCounter++;
 					const density = (0.5 - 2 * Math.sqrt(magDrSq) + 2 * magDrSq);
 					this.densities[u] += density;
@@ -166,6 +166,7 @@ class FluidHandler {
 			for (let i = chunkBegins; i < chunkEnds; i++) {
 				const u = sortedIds[i];
 				this.lapV[u].copy(lapV[i - chunkBegins]);
+				this.gradP[u].add(tensions[i - chunkBegins].multiplyScalar(this.tension));
 			}
 			for (let i = 0; i < forcesMag.length; i++) {
 				const u = forcesTo[i];
@@ -226,7 +227,7 @@ class FluidHandler {
 	}
 }
 
-export const Simulation = new FluidHandler(2000);
+export const Simulation = new FluidHandler(3000);
 
 // @ts-ignore
 window.Simulation = Simulation;
