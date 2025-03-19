@@ -2,7 +2,7 @@ import { Vector3 } from "three";
 
 export const worldBottom = -10;
 const worldWidth = 7;
-const restitution = 0.7;
+const restitution = 0.1;
 const influence = 0.5;
 function interLeave3(input: number) {
 	let x = input;
@@ -31,7 +31,8 @@ class FluidHandler {
 	lapV: Vector3[] = [];
 
 	pressureForceStrength = 3;
-	viscosity = 10;
+	viscosity = 2;
+	tension = 3;
 
 	timeElapsed = 0;
 	interactionCounter = 0;
@@ -96,7 +97,7 @@ class FluidHandler {
 	}
 
 	gravity(i: number) {
-		return new Vector3(0, -2, 0);
+		//return new Vector3(0, -2, 0);
 		const lengthSq = this.r[i].x * this.r[i].x + (this.r[i].y + worldWidth) * (this.r[i].y + worldWidth);
 		const convection = new Vector3(0, 20 * Math.exp(-lengthSq), 0);
 		return new Vector3(0, -2, 0).add(convection);
@@ -145,6 +146,8 @@ class FluidHandler {
 						dry,
 						drz,
 					);
+					this.gradP[u].add(dr.clone().multiplyScalar(this.tension));
+					this.gradP[v].sub(dr.clone().multiplyScalar(this.tension));
 					this.interactionCounter++;
 					const density = (0.5 - 2 * Math.sqrt(magDrSq) + 2 * magDrSq);
 					this.densities[u] += density;
@@ -166,7 +169,7 @@ class FluidHandler {
 			}
 			for (let i = 0; i < forcesMag.length; i++) {
 				const u = forcesTo[i];
-				const u1 = (this.densities[u] - targetDensity) / targetDensity;
+				const u1 = (this.densities[u]) / targetDensity;
 				const u2 = u1 * u1;
 				const densityMultiplier = Math.min(u2 * u2 * u2, 10) * this.pressureForceStrength;
 				forcesMag[i].multiplyScalar(densityMultiplier);
@@ -205,17 +208,17 @@ class FluidHandler {
 				this.v[i].y = -this.v[i].y * restitution;
 			}
 			if (Math.abs(this.r[i].x) > worldWidth) {
-				this.r[i].x = Math.sign(this.r[i].x) * 2 * worldWidth - this.r[i].x;
+				this.r[i].x = Math.sign(this.r[i].x) * (1 + restitution) * worldWidth - this.r[i].x * restitution;
 				this.v[i].x *= -restitution;
 				/* this.v[i].x = this.v[i].x * (0.04 ** dt) -
 					Math.sign(this.r[i].x) * (Math.abs(this.r[i].x) - worldWidth) * dt; */
 			}
 			if (Math.abs(this.r[i].y) > worldWidth) {
-				this.r[i].y = Math.sign(this.r[i].y) * 2 * worldWidth - this.r[i].y;
+				this.r[i].y = Math.sign(this.r[i].y) * (1 + restitution) * worldWidth - this.r[i].y * restitution;
 				this.v[i].y *= -restitution;
 			}
 			if (Math.abs(this.r[i].z) > worldWidth) {
-				this.r[i].z = Math.sign(this.r[i].z) * 2 * worldWidth - this.r[i].z;
+				this.r[i].z = Math.sign(this.r[i].z) * (1 + restitution) * worldWidth - this.r[i].z * restitution;
 				this.v[i].z *= -restitution;
 			}
 			this.updateChunk(i, prevPos);
@@ -223,7 +226,7 @@ class FluidHandler {
 	}
 }
 
-export const Simulation = new FluidHandler(3000);
+export const Simulation = new FluidHandler(2000);
 
 // @ts-ignore
 window.Simulation = Simulation;
