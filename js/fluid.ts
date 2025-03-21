@@ -30,7 +30,7 @@ function getChunkWStKey(pos: Vector3) {
 }
 
 function getPressure(_density: number) {
-	const density = _density / targetDensity - 0.85;
+	const density = _density / targetDensity - 0.8;
 	const u1 = density * density * density;
 	return u1 * u1 * density * pressureForceStrength;
 }
@@ -52,8 +52,8 @@ const WSt = (() => {
 	const invInfSq = 1 / influenceStSq;
 	const halfInf = influenceSt / 2;
 	const halfInfSq = halfInf * halfInf;
-	return (magDrSq: number) => normalize * (magDrSq < halfInfSq ? Math.sqrt(magDrSq * invInfSq)
-		: magDrSq * invInfSq - 2 * Math.sqrt(magDrSq * invInfSq) + 1);
+	return (magDrSq: number) => normalize * (magDrSq < halfInfSq ? 0.5
+		: 1 - Math.sqrt(magDrSq * invInfSq));
 })();
 
 const targetDensity = 1.5 * W(0), selfDensity = W(0);
@@ -109,8 +109,9 @@ class FluidHandler {
 	gradP: Vector3[] = [];
 	lapV: Vector3[] = [];
 
-	viscosity = 1;
+	viscosity = 0.4;
 	tension = 10;
+	diffusion = 1;
 
 	timeElapsed = 0;
 
@@ -307,9 +308,8 @@ class FluidHandler {
 						dry,
 						drz,
 					);
-					const densitySt = WSt(magDrSq);
-					tensions[i - chunkBegins].add(dr.normalize().multiplyScalar(
-						Math.min(densitySt * this.tension, 100)
+					tensions[i - chunkBegins].add(dr.multiplyScalar(
+						Math.min(WSt(magDrSq) * this.tension, 100)
 					));
 				}
 			}
@@ -341,7 +341,7 @@ class FluidHandler {
 		for (let i = 0; i < this.n; i++) {
 			this.v[i].add(this.gravity(i).multiplyScalar(dt));
 			this.v[i].add(this.gradP[i].clone().multiplyScalar(dt));
-			this.v[i].add(this.lapV[i].clone().multiplyScalar(dt * this.viscosity));
+			this.v[i].add(this.lapV[i].clone().multiplyScalar(dt * this.viscosity * (2 * (dimension + 2))));
 			const prevPos = this.r[i].clone();
 			this.r[i].add(this.v[i].clone().multiplyScalar(dt));
 			for (const boundary of this.boundaries) {
@@ -357,17 +357,17 @@ Simulation.boundaries.push(new Boundary({
 	sgnDistance(r: Vector3) { return worldWidth - r.x; },
 	displacement(r: Vector3) { return new Vector3(r.x - worldWidth, 0, 0); },
 	restitution: 0.1,
-	adhesion: 100,
+	adhesion: 37,
 }),
 new Boundary({
 	sgnDistance(r: Vector3) { return r.x + worldWidth; },
 	displacement(r: Vector3) { return new Vector3(r.x + worldWidth, 0, 0); },
 	restitution: 0.1,
-	adhesion: 100,
+	adhesion: 37,
 }),
 new Boundary({
-	sgnDistance(r: Vector3) { return r.y + worldWidth; },
-	displacement(r: Vector3) { return new Vector3(0, r.y + worldWidth, 0); },
+	sgnDistance(r: Vector3) { return r.y + worldWidth + 3; },
+	displacement(r: Vector3) { return new Vector3(0, r.y + worldWidth + 3, 0); },
 	restitution: 0.1,
 	adhesion: 1,
 }));
