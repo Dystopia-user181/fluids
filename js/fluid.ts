@@ -2,14 +2,31 @@ import { Vector3 } from "three";
 
 export const worldBottom = -16;
 const worldWidth = 16;
-const restitution = 0.5;
 const influence = 0.5;
-const influenceSt = 1;
+const influenceSt = 2;
 const influenceSq = influence * influence;
 const influenceStSq = influenceSt * influenceSt;
 const dimension = 2;
 
 const pressureForceStrength = 5e6;
+
+function interLeave3(input: number) {
+	let x = input;
+	x = (x | x << 8) & 0xf00f00f00f00f;
+	x = (x | x << 4) & 0x30c30c30c30c3;
+	x = (x | x << 2) & 0x0249249249249;
+	return x;
+}
+function getChunkWKey(pos: Vector3) {
+	return (interLeave3(Math.round((pos.x + 10) / influence)) +
+		(interLeave3(Math.round((pos.y + 10) / influence)) << 1) +
+		(interLeave3(Math.round((pos.z + 10) / influence)) << 2)) & 4095;
+}
+function getChunkWStKey(pos: Vector3) {
+	return (interLeave3(Math.round((pos.x + 10) / influenceSt)) +
+		(interLeave3(Math.round((pos.y + 10) / influenceSt)) << 1) +
+		(interLeave3(Math.round((pos.z + 10) / influenceSt)) << 2)) & 4095;
+}
 
 function getPressure(_density: number) {
 	const density = _density / targetDensity - 0.85;
@@ -29,35 +46,52 @@ const gradW = (() => {
 	return (dr: Vector3) => dr.clone().multiplyScalar(normalize * (invInfSq - Math.sqrt(invInfSq / dr.lengthSq())));
 })();
 
-function interLeave3(input: number) {
-	let x = input;
-	x = (x | x << 8) & 0xf00f00f00f00f;
-	x = (x | x << 4) & 0x30c30c30c30c3;
-	x = (x | x << 2) & 0x0249249249249;
-	return x;
-}
-function getChunkWKey(pos: Vector3) {
-	return (interLeave3(Math.round((pos.x + 10) / influence)) +
-		(interLeave3(Math.round((pos.y + 10) / influence)) << 1) +
-		(interLeave3(Math.round((pos.z + 10) / influence)) << 2)) & 4095;
-}
-
 const WSt = (() => {
 	const normalize = 1 / (influenceSt ** dimension);
 	const invInfSq = 1 / influenceStSq;
 	const halfInf = influenceSt / 2;
 	const halfInfSq = halfInf * halfInf;
-	return (magDrSq: number) => normalize * (magDrSq < halfInfSq ? 0
-		: -magDrSq * invInfSq + 1.5 * Math.sqrt(magDrSq * invInfSq) - 0.5);
+	return (magDrSq: number) => normalize * (magDrSq < halfInfSq ? Math.sqrt(magDrSq * invInfSq)
+		: magDrSq * invInfSq - 2 * Math.sqrt(magDrSq * invInfSq) + 1);
 })();
 
-function getChunkWStKey(pos: Vector3) {
-	return (interLeave3(Math.round((pos.x + 10) / influenceSt)) +
-		(interLeave3(Math.round((pos.y + 10) / influenceSt)) << 1) +
-		(interLeave3(Math.round((pos.z + 10) / influenceSt)) << 2)) & 4095;
-}
-
 const targetDensity = 1.5 * W(0), selfDensity = W(0);
+
+interface BoundaryConfig {
+	displacement: (x: Vector3) => Vector3,
+	sgnDistance: (x: Vector3) => number,
+	restitution: number,
+	adhesion: number,
+}
+class Boundary {
+	config: BoundaryConfig;
+
+	constructor(x: Partial<BoundaryConfig>) {
+		if (!x.displacement) throw "Boundary needs displacement function";
+		if (!x.sgnDistance) throw "Boundary needs distance function";
+		this.config = {
+			displacement: x.displacement,
+			sgnDistance: x.sgnDistance,
+			restitution: x.restitution || 0,
+			adhesion: x.adhesion || 0,
+		};
+	}
+
+	distance(x: Vector3) {
+		return this.config.sgnDistance(x.clone());
+	}
+
+	displacement(x: Vector3) {
+		return this.config.displacement(x.clone());
+	}
+
+	handleCollision(r: Vector3, v: Vector3) {
+		if (this.distance(r) >= 0) return;
+		const d = this.displacement(r);
+		r.sub(d.clone());
+		v.sub(v.clone().projectOnVector(d).multiplyScalar(1 + this.config.restitution));
+	}
+}
 
 class FluidHandler {
 	n = 0;
@@ -67,6 +101,8 @@ class FluidHandler {
 	chunkedRSt = Array(4096).fill(0).map(() => new Set<number>());
 	inChunk: number[] = [];
 	inChunkSt: number[] = [];
+
+	boundaries: Boundary[] = [];
 
 	densities: number[] = [];
 	gradP: Vector3[] = [];
@@ -225,6 +261,16 @@ class FluidHandler {
 	}
 
 	calcTension() {
+		for (let i = 0; i < this.n; i++) {
+			for (const boundary of this.boundaries) {
+				const d = boundary.distance(this.r[i]);
+				if (d < influenceSt) {
+					this.gradP[i].sub(boundary.displacement(this.r[i]).normalize().multiplyScalar(
+						WSt(d) * boundary.config.adhesion
+					));
+				}
+			}
+		}
 		const sortedIds = Array.from({ length: this.n }, (_, i) => i)
 			.sort((a, b) => this.inChunkSt[a] - this.inChunkSt[b]);
 		const corrChunk = sortedIds.map(x => this.inChunkSt[x]);
@@ -259,8 +305,8 @@ class FluidHandler {
 					);
 					const densitySt = WSt(magDrSq);
 					tensions[i - chunkBegins].add(dr.normalize().multiplyScalar(
-						Math.min(densitySt * this.tension, 100))
-					);
+						Math.min(densitySt * this.tension, 100)
+					));
 				}
 			}
 			for (let i = chunkBegins; i < chunkEnds; i++) {
@@ -294,23 +340,8 @@ class FluidHandler {
 			this.v[i].add(this.lapV[i].clone().multiplyScalar(dt * this.viscosity));
 			const prevPos = this.r[i].clone();
 			this.r[i].add(this.v[i].clone().multiplyScalar(dt));
-			if (this.r[i].y < worldBottom) {
-				this.r[i].y = worldBottom;
-				this.v[i].y = -this.v[i].y * restitution;
-			}
-			if (Math.abs(this.r[i].x) > worldWidth) {
-				this.r[i].x = Math.sign(this.r[i].x) * (1 + restitution) * worldWidth - this.r[i].x * restitution;
-				this.v[i].x *= -restitution;
-				/* this.v[i].x = this.v[i].x * (0.04 ** dt) -
-					Math.sign(this.r[i].x) * (Math.abs(this.r[i].x) - worldWidth) * dt; */
-			}
-			if (this.r[i].y < -worldWidth) {
-				this.r[i].y = Math.sign(this.r[i].y) * (1 + restitution) * worldWidth - this.r[i].y * restitution;
-				this.v[i].y *= -restitution;
-			}
-			if (Math.abs(this.r[i].z) > worldWidth) {
-				this.r[i].z = Math.sign(this.r[i].z) * (1 + restitution) * worldWidth - this.r[i].z * restitution;
-				this.v[i].z *= -restitution;
+			for (const boundary of this.boundaries) {
+				boundary.handleCollision(this.r[i], this.v[i]);
 			}
 			this.updateChunk(i, prevPos);
 		}
@@ -318,6 +349,24 @@ class FluidHandler {
 }
 
 export const Simulation = new FluidHandler(3500);
+Simulation.boundaries.push(new Boundary({
+	sgnDistance(r: Vector3) { return r.x + worldWidth; },
+	displacement(r: Vector3) { return new Vector3(r.x + worldWidth, 0, 0); },
+	restitution: 0.1,
+	adhesion: -100,
+}),
+new Boundary({
+	sgnDistance(r: Vector3) { return worldWidth - r.x; },
+	displacement(r: Vector3) { return new Vector3(r.x - worldWidth, 0, 0); },
+	restitution: 0.1,
+	adhesion: -100,
+}),
+new Boundary({
+	sgnDistance(r: Vector3) { return r.y + worldWidth; },
+	displacement(r: Vector3) { return new Vector3(0, r.y + worldWidth, 0); },
+	restitution: 0.1,
+	adhesion: 1,
+}));
 
 // @ts-ignore
 window.Simulation = Simulation;
