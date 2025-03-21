@@ -9,7 +9,7 @@ const influenceSq = influence * influence;
 const influenceStSq = influenceSt * influenceSt;
 const dimension = 2;
 
-const pressureForceStrength = 5e5;
+const pressureForceStrength = 5e6;
 
 function getPressure(_density: number) {
 	const density = _density / targetDensity - 0.85;
@@ -144,11 +144,11 @@ class FluidHandler {
 	}
 
 	gravity(i: number) {
-		const lengthSq = this.r[i].x * this.r[i].x + 0.01 * (this.r[i].y + worldWidth) * (this.r[i].y + worldWidth);
+		// const lengthSq = this.r[i].x * this.r[i].x + 0.01 * (this.r[i].y + worldWidth) * (this.r[i].y + worldWidth);
 		const phase = this.timeElapsed * 0.15;
-		const mulFactor = Math.sin(phase) < -0.9 ? 6 : 0;
-		const convection = new Vector3(0, mulFactor * Math.exp(-0.5 * lengthSq), 0);
-		return new Vector3(0, -2, 0).add(convection);
+		const mulFactor = Math.sin(phase) > 0.93 ? 2 : 0;
+		const convection = new Vector3(mulFactor, 0, 0);
+		return new Vector3(0, -3, 0).add(convection);
 		const rr = this.r[i].clone().add(new Vector3(0, 0, 0));
 		return rr.clone().multiplyScalar(-Math.min(3 / (rr.lengthSq() ** 1.5), 1));
 		// const phase = this.timeElapsed * 0.5;
@@ -216,7 +216,7 @@ class FluidHandler {
 			}
 			for (let i = 0; i < forcesMag.length; i++) {
 				const u = forcesTo[i];
-				const multiplier = Math.min(getPressure(this.densities[u]), 600);
+				const multiplier = Math.min(getPressure(this.densities[u]), 1000);
 				forcesMag[i].multiplyScalar(multiplier / this.densities[u] / this.densities[u]);
 				this.gradP[u].add(forcesMag[i]);
 				this.gradP[forcesBy[i]].sub(forcesMag[i]);
