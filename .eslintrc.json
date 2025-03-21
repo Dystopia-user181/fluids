@@ -185,7 +185,6 @@
 				"code": 120
 			}
 		],
-		"max-params": ["warn", 4],
 		"max-statements-per-line": ["error", { "max": 1 }],
 		"multiline-comment-style": "off",
 		"new-parens": "error",

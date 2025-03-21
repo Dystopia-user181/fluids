@@ -5,7 +5,7 @@ import { scene } from "./scene.js";
 import "./lights.js";
 
 const camera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.z = 13;
+camera.position.z = 18;
 
 const renderer = new THREE.WebGLRenderer();
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -37,8 +37,8 @@ function animate(newTime: number) {
 	time = newTime;
 	Simulation.tick(dt);
 	for (let i = 0; i < Simulation.n; i++) {
-		const d = Simulation.densities[i] * 2 - 1;
-		const hue = 204 / (1 + d * d * d * d * d * d);
+		const d = Math.max(Simulation.densities[i] * 0.7 - 3.8, -0.7);
+		const hue = 204 / (1 + d * d * d * d * d * 0.4);
 		spheres[i].position.copy(Simulation.r[i]);
 		spheres[i].material.color.setHSL(hue / 360, 0.83, 0.34);
 	}

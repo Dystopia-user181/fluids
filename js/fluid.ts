@@ -1,9 +1,34 @@
 import { Vector3 } from "three";
 
-export const worldBottom = -12;
-const worldWidth = 12;
-const restitution = 0.1;
+export const worldBottom = -16;
+const worldWidth = 16;
+const restitution = 0.5;
 const influence = 0.5;
+const influenceSt = 1;
+const influenceSq = influence * influence;
+const influenceStSq = influenceSt * influenceSt;
+const dimension = 2;
+
+const pressureForceStrength = 5e5;
+
+function getPressure(_density: number) {
+	const density = _density / targetDensity - 0.85;
+	const u1 = density * density * density;
+	return u1 * u1 * density * pressureForceStrength;
+}
+
+const W = (() => {
+	const normalize = 1 / (influence ** dimension);
+	const invInfSq = 1 / influenceSq;
+	return (magDrSq: number) => normalize * (magDrSq * invInfSq - 2 * Math.sqrt(magDrSq * invInfSq) + 1);
+})();
+
+const gradW = (() => {
+	const normalize = 2 / (influence ** dimension);
+	const invInfSq = 1 / influenceSq;
+	return (dr: Vector3) => dr.clone().multiplyScalar(normalize * (invInfSq - Math.sqrt(invInfSq / dr.lengthSq())));
+})();
+
 function interLeave3(input: number) {
 	let x = input;
 	x = (x | x << 8) & 0xf00f00f00f00f;
@@ -11,52 +36,69 @@ function interLeave3(input: number) {
 	x = (x | x << 2) & 0x0249249249249;
 	return x;
 }
-function getSegmentKey(pos: Vector3) {
+function getChunkWKey(pos: Vector3) {
 	return (interLeave3(Math.round((pos.x + 10) / influence)) +
 		(interLeave3(Math.round((pos.y + 10) / influence)) << 1) +
 		(interLeave3(Math.round((pos.z + 10) / influence)) << 2)) & 4095;
 }
 
-const targetDensity = 0.75, selfDensity = 0.5;
+const WSt = (() => {
+	const normalize = 1 / (influenceSt ** dimension);
+	const invInfSq = 1 / influenceStSq;
+	const halfInf = influenceSt / 2;
+	const halfInfSq = halfInf * halfInf;
+	return (magDrSq: number) => normalize * (magDrSq < halfInfSq ? 0
+		: -magDrSq * invInfSq + 1.5 * Math.sqrt(magDrSq * invInfSq) - 0.5);
+})();
+
+function getChunkWStKey(pos: Vector3) {
+	return (interLeave3(Math.round((pos.x + 10) / influenceSt)) +
+		(interLeave3(Math.round((pos.y + 10) / influenceSt)) << 1) +
+		(interLeave3(Math.round((pos.z + 10) / influenceSt)) << 2)) & 4095;
+}
+
+const targetDensity = 1.5 * W(0), selfDensity = W(0);
 
 class FluidHandler {
 	n = 0;
 	r: Vector3[] = [];
 	v: Vector3[] = [];
 	chunkedR = Array(4096).fill(0).map(() => new Set<number>());
+	chunkedRSt = Array(4096).fill(0).map(() => new Set<number>());
 	inChunk: number[] = [];
+	inChunkSt: number[] = [];
 
 	densities: number[] = [];
 	gradP: Vector3[] = [];
 	lapV: Vector3[] = [];
 
-	pressureForceStrength = 3;
 	viscosity = 3;
 	tension = 10;
 
 	timeElapsed = 0;
-	interactionCounter = 0;
 
 	constructor(number: number) {
 		this.n = number;
 		for (let i = 0; i < this.n; i++) {
-			this.r.push(new Vector3(Math.random() * 18 - 9, Math.random() * 7 - 12, 0));
+			this.r.push(new Vector3(Math.random() * 32 - 16, Math.random() * 32 - 16));
 			this.v.push(new Vector3(0, 0, 0));
 			this.densities.push(selfDensity);
 			this.gradP.push(new Vector3(0, 0, 0));
 			this.lapV.push(new Vector3(0, 0, 0));
 			this.inChunk.push(4098);
+			this.inChunkSt.push(4098);
 			this.updateChunk(i);
 		}
 	}
 
-	updateChunk(u: number, _prevPos?: Vector3) {
-		const newKey = getSegmentKey(this.r[u]);
-		if (this.inChunk[u] === newKey && !_prevPos) return;
+	_updateChunk(keyFunc: (x: Vector3) => number, chunkList: Set<number>[], chunkIdentifier: number[],
+		radius: number, u: number, _prevPos?: Vector3) {
+		const newKey = keyFunc(this.r[u]);
+		if (chunkIdentifier[u] === newKey && !_prevPos) return;
 		const prevPos = _prevPos ? _prevPos : new Vector3(Infinity, Infinity, Infinity);
-		const dx = Math.round(this.r[u].x / influence) - Math.round(prevPos.x / influence);
-		const dy = Math.round(this.r[u].y / influence) - Math.round(prevPos.y / influence);
-		const dz = Math.round(this.r[u].z / influence) - Math.round(prevPos.z / influence);
+		const dx = Math.round(this.r[u].x / radius) - Math.round(prevPos.x / radius);
+		const dy = Math.round(this.r[u].y / radius) - Math.round(prevPos.y / radius);
+		const dz = Math.round(this.r[u].z / radius) - Math.round(prevPos.z / radius);
 		if (_prevPos) {
 			for (let i = -1; i < 2; i++) {
 				for (let j = -1; j < 2; j++) {
@@ -66,17 +108,17 @@ class FluidHandler {
 							-dy + j >= -1 && -dy + j <= 1 &&
 							-dz + k >= -1 && -dz + k <= 1) continue;
 						const newPos = new Vector3(
-							prevPos.x + i * influence,
-							prevPos.y + j * influence,
-							prevPos.z + k * influence
+							prevPos.x + i * radius,
+							prevPos.y + j * radius,
+							prevPos.z + k * radius
 						);
-						const key = getSegmentKey(newPos);
-						this.chunkedR[key].delete(u);
+						const key = keyFunc(newPos);
+						chunkList[key].delete(u);
 					}
 				}
 			}
 		}
-		this.inChunk[u] = newKey;
+		chunkIdentifier[u] = newKey;
 		for (let i = -1; i < 2; i++) {
 			for (let j = -1; j < 2; j++) {
 				for (let k = -1; k < 2; k++) {
@@ -85,27 +127,35 @@ class FluidHandler {
 						dy + j >= -1 && dy + j <= 1 &&
 						dz + k >= -1 && dz + k <= 1) continue;
 					const newPos = new Vector3(
-						this.r[u].x + i * influence,
-						this.r[u].y + j * influence,
-						this.r[u].z + k * influence
+						this.r[u].x + i * radius,
+						this.r[u].y + j * radius,
+						this.r[u].z + k * radius
 					);
-					const key = getSegmentKey(newPos);
-					this.chunkedR[key].add(u);
+					const key = keyFunc(newPos);
+					chunkList[key].add(u);
 				}
 			}
 		}
 	}
 
+	updateChunk(u: number, _prevPos?: Vector3) {
+		this._updateChunk(getChunkWKey, this.chunkedR, this.inChunk, influence, u, _prevPos);
+		this._updateChunk(getChunkWStKey, this.chunkedRSt, this.inChunkSt, influenceSt, u, _prevPos);
+	}
+
 	gravity(i: number) {
-		//return new Vector3(0, -2, 0);
-		const lengthSq = this.r[i].x * this.r[i].x + 0.07 * (this.r[i].y + worldWidth) * (this.r[i].y + worldWidth);
-		const convection = new Vector3(0, 30 * Math.exp(-2 * lengthSq), 0);
+		const lengthSq = this.r[i].x * this.r[i].x + 0.01 * (this.r[i].y + worldWidth) * (this.r[i].y + worldWidth);
+		const phase = this.timeElapsed * 0.15;
+		const mulFactor = Math.sin(phase) < -0.9 ? 6 : 0;
+		const convection = new Vector3(0, mulFactor * Math.exp(-0.5 * lengthSq), 0);
 		return new Vector3(0, -2, 0).add(convection);
-		const phase = this.timeElapsed * 0.0609;
-		const r = this.r[i].clone().add(new Vector3(2 * Math.cos(phase), 2 * Math.sin(phase), 0));
+		const rr = this.r[i].clone().add(new Vector3(0, 0, 0));
+		return rr.clone().multiplyScalar(-Math.min(3 / (rr.lengthSq() ** 1.5), 1));
+		// const phase = this.timeElapsed * 0.5;
+		const r = this.r[i].clone().add(new Vector3(4 * Math.cos(phase), 4 * Math.sin(phase), 0));
 		const g1 = r.clone().multiplyScalar(-Math.min(0.1 / (r.lengthSq() ** 1.5), 1));
 		const r2 = r.sub(new Vector3(4 * Math.cos(phase), 4 * Math.sin(phase), 0));
-		const g2 = r2.clone().multiplyScalar(-Math.min(0.1 / (r2.lengthSq() ** 1.5), 1));
+		const g2 = r2.clone().multiplyScalar(-Math.min(10 / (r2.lengthSq() ** 1.5), 1));
 		return g1.add(g2);
 	}
 
@@ -123,7 +173,6 @@ class FluidHandler {
 			const corrR = sortedIds.slice(chunkBegins, chunkEnds).map(x => this.r[x].clone());
 			const corrV = sortedIds.slice(chunkBegins, chunkEnds).map(x => this.v[x].clone());
 			const lapV = corrR.map(() => new Vector3());
-			const tensions = corrR.map(() => new Vector3());
 			const forcesMag = [];
 			const forcesTo = [];
 			const forcesBy = [];
@@ -141,17 +190,15 @@ class FluidHandler {
 					const dry = r1y - r2y;
 					const drz = r1z - r2z;
 					const magDrSq = drx * drx + dry * dry + drz * drz;
-					if (magDrSq < 1e-15 || magDrSq > 0.25) continue;
+					if (magDrSq > influenceSq || magDrSq < 1e-15) continue;
 					const dr = new Vector3(
 						drx,
 						dry,
 						drz,
 					);
-					tensions[i - chunkBegins].add(dr.clone());
-					this.interactionCounter++;
-					const density = (0.5 - 2 * Math.sqrt(magDrSq) + 2 * magDrSq);
+					const density = W(magDrSq);
 					this.densities[u] += density;
-					forcesMag.push(dr.multiplyScalar(4 - 2 / Math.sqrt(magDrSq)));
+					forcesMag.push(gradW(dr));
 					forcesTo.push(u);
 					forcesBy.push(v);
 					const { x: v2x, y: v2y, z: v2z } = corrV[i - chunkBegins];
@@ -166,23 +213,66 @@ class FluidHandler {
 			for (let i = chunkBegins; i < chunkEnds; i++) {
 				const u = sortedIds[i];
 				this.lapV[u].copy(lapV[i - chunkBegins]);
-				this.gradP[u].add(tensions[i - chunkBegins].multiplyScalar(this.tension));
 			}
 			for (let i = 0; i < forcesMag.length; i++) {
 				const u = forcesTo[i];
-				const u1 = (this.densities[u]) / targetDensity;
-				const u2 = u1 * u1;
-				const densityMultiplier = Math.min(u2 * u2 * u2, 10) * this.pressureForceStrength;
-				forcesMag[i].multiplyScalar(densityMultiplier);
+				const multiplier = Math.min(getPressure(this.densities[u]), 600);
+				forcesMag[i].multiplyScalar(multiplier / this.densities[u] / this.densities[u]);
 				this.gradP[u].add(forcesMag[i]);
 				this.gradP[forcesBy[i]].sub(forcesMag[i]);
 			}
 		}
 	}
 
+	calcTension() {
+		const sortedIds = Array.from({ length: this.n }, (_, i) => i)
+			.sort((a, b) => this.inChunkSt[a] - this.inChunkSt[b]);
+		const corrChunk = sortedIds.map(x => this.inChunkSt[x]);
+		let ptr = 0;
+		while (ptr < this.n) {
+			const chunkBegins = ptr;
+			const chunk = corrChunk[ptr];
+			while (corrChunk[ptr] === corrChunk[ptr + 1]) ptr++;
+			ptr++;
+			const chunkEnds = ptr;
+			// This is to help with caching
+			const corrR = sortedIds.slice(chunkBegins, chunkEnds).map(x => this.r[x].clone());
+			const tensions = corrR.map(() => new Vector3());
+			for (const v of this.chunkedRSt[chunk]) {
+				const { x: r1x, y: r1y, z: r1z } = this.r[v];
+				for (let i = chunkBegins; i < chunkEnds; i++) {
+					const u = sortedIds[i];
+					if (v === u) continue;
+					// Putting const dr = ... After the calculation seemed inconsequential but I was able to
+					// improve performance slightly with it from ~54fps to 60fps (when not running the renderer)
+					// so I'm not questioning it
+					const { x: r2x, y: r2y, z: r2z } = corrR[i - chunkBegins];
+					const drx = r1x - r2x;
+					const dry = r1y - r2y;
+					const drz = r1z - r2z;
+					const magDrSq = drx * drx + dry * dry + drz * drz;
+					if (magDrSq > influenceStSq || magDrSq < 1e-15) continue;
+					const dr = new Vector3(
+						drx,
+						dry,
+						drz,
+					);
+					const densitySt = WSt(magDrSq);
+					tensions[i - chunkBegins].add(dr.normalize().multiplyScalar(
+						Math.min(densitySt * this.tension, 100))
+					);
+				}
+			}
+			for (let i = chunkBegins; i < chunkEnds; i++) {
+				const u = sortedIds[i];
+				this.gradP[u].add(tensions[i - chunkBegins]);
+			}
+		}
+	}
+
 	tick(dt: number) {
-		const _dt = Math.min(dt, 0.02);
-		const n = Math.ceil(_dt / 1);
+		const _dt = Math.min(dt, 0.03);
+		const n = Math.ceil(_dt / 0.01);
 
 		for (let i = 0; i < n; i++) {
 			// let prev = calledTimes;
@@ -192,12 +282,12 @@ class FluidHandler {
 	}
 
 	_tick(dt: number) {
-		this.interactionCounter = 0;
 		this.timeElapsed += dt;
 		this.densities.fill(selfDensity);
 		this.gradP.forEach(v => v.set(0, 0, 0));
 		this.lapV.forEach(v => v.set(0, 0, 0));
 		this.calcProperties();
+		this.calcTension();
 		for (let i = 0; i < this.n; i++) {
 			this.v[i].add(this.gravity(i).multiplyScalar(dt));
 			this.v[i].add(this.gradP[i].clone().multiplyScalar(dt));
@@ -214,7 +304,7 @@ class FluidHandler {
 				/* this.v[i].x = this.v[i].x * (0.04 ** dt) -
 					Math.sign(this.r[i].x) * (Math.abs(this.r[i].x) - worldWidth) * dt; */
 			}
-			if (Math.abs(this.r[i].y) > worldWidth) {
+			if (this.r[i].y < -worldWidth) {
 				this.r[i].y = Math.sign(this.r[i].y) * (1 + restitution) * worldWidth - this.r[i].y * restitution;
 				this.v[i].y *= -restitution;
 			}
@@ -227,7 +317,7 @@ class FluidHandler {
 	}
 }
 
-export const Simulation = new FluidHandler(3000);
+export const Simulation = new FluidHandler(3500);
 
 // @ts-ignore
 window.Simulation = Simulation;
