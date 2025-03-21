@@ -1,14 +1,15 @@
 import { Vector3 } from "three";
 
 export const worldBottom = -16;
-const worldWidth = 16;
+const worldWidth = 3;
 const influence = 0.5;
-const influenceSt = 2;
+const influenceSt = 1.5;
 const influenceSq = influence * influence;
 const influenceStSq = influenceSt * influenceSt;
 const dimension = 2;
 
 const pressureForceStrength = 5e6;
+const constantEncodeOffset = 10;
 
 function interLeave3(input: number) {
 	let x = input;
@@ -18,14 +19,14 @@ function interLeave3(input: number) {
 	return x;
 }
 function getChunkWKey(pos: Vector3) {
-	return (interLeave3(Math.round((pos.x + 10) / influence)) +
-		(interLeave3(Math.round((pos.y + 10) / influence)) << 1) +
-		(interLeave3(Math.round((pos.z + 10) / influence)) << 2)) & 4095;
+	return (interLeave3(Math.round((pos.x + constantEncodeOffset) / influence)) +
+		(interLeave3(Math.round((pos.y + constantEncodeOffset) / influence)) << 1) +
+		(interLeave3(Math.round((pos.z + constantEncodeOffset) / influence)) << 2)) & 4095;
 }
 function getChunkWStKey(pos: Vector3) {
-	return (interLeave3(Math.round((pos.x + 10) / influenceSt)) +
-		(interLeave3(Math.round((pos.y + 10) / influenceSt)) << 1) +
-		(interLeave3(Math.round((pos.z + 10) / influenceSt)) << 2)) & 4095;
+	return (interLeave3(Math.round((pos.x + constantEncodeOffset) / influenceSt)) +
+		(interLeave3(Math.round((pos.y + constantEncodeOffset) / influenceSt)) << 1) +
+		(interLeave3(Math.round((pos.z + constantEncodeOffset) / influenceSt)) << 2)) & 4095;
 }
 
 function getPressure(_density: number) {
@@ -88,7 +89,7 @@ class Boundary {
 	handleCollision(r: Vector3, v: Vector3) {
 		if (this.distance(r) >= 0) return;
 		const d = this.displacement(r);
-		r.sub(d.clone());
+		r.sub(d);
 		v.sub(v.clone().projectOnVector(d).multiplyScalar(1 + this.config.restitution));
 	}
 }
@@ -108,7 +109,7 @@ class FluidHandler {
 	gradP: Vector3[] = [];
 	lapV: Vector3[] = [];
 
-	viscosity = 3;
+	viscosity = 1;
 	tension = 10;
 
 	timeElapsed = 0;
@@ -116,7 +117,7 @@ class FluidHandler {
 	constructor(number: number) {
 		this.n = number;
 		for (let i = 0; i < this.n; i++) {
-			this.r.push(new Vector3(Math.random() * 32 - 16, Math.random() * 32 - 16));
+			this.r.push(new Vector3(Math.random() * 6 - 3, Math.random() * 32 - 3));
 			this.v.push(new Vector3(0, 0, 0));
 			this.densities.push(selfDensity);
 			this.gradP.push(new Vector3(0, 0, 0));
@@ -132,9 +133,12 @@ class FluidHandler {
 		const newKey = keyFunc(this.r[u]);
 		if (chunkIdentifier[u] === newKey && !_prevPos) return;
 		const prevPos = _prevPos ? _prevPos : new Vector3(Infinity, Infinity, Infinity);
-		const dx = Math.round(this.r[u].x / radius) - Math.round(prevPos.x / radius);
-		const dy = Math.round(this.r[u].y / radius) - Math.round(prevPos.y / radius);
-		const dz = Math.round(this.r[u].z / radius) - Math.round(prevPos.z / radius);
+		const dx = Math.round((this.r[u].x + constantEncodeOffset) / radius) -
+			Math.round((prevPos.x + constantEncodeOffset) / radius);
+		const dy = Math.round((this.r[u].y + constantEncodeOffset) / radius) -
+			Math.round((prevPos.y + constantEncodeOffset) / radius);
+		const dz = Math.round((this.r[u].z + constantEncodeOffset) / radius) -
+			Math.round((prevPos.z + constantEncodeOffset) / radius);
 		if (_prevPos) {
 			for (let i = -1; i < 2; i++) {
 				for (let j = -1; j < 2; j++) {
@@ -182,7 +186,7 @@ class FluidHandler {
 	gravity(i: number) {
 		// const lengthSq = this.r[i].x * this.r[i].x + 0.01 * (this.r[i].y + worldWidth) * (this.r[i].y + worldWidth);
 		const phase = this.timeElapsed * 0.15;
-		const mulFactor = Math.sin(phase) > 0.93 ? 2 : 0;
+		const mulFactor = Math.sin(phase) > 0.93 ? 0 : 0;
 		const convection = new Vector3(mulFactor, 0, 0);
 		return new Vector3(0, -3, 0).add(convection);
 		const rr = this.r[i].clone().add(new Vector3(0, 0, 0));
@@ -348,18 +352,18 @@ class FluidHandler {
 	}
 }
 
-export const Simulation = new FluidHandler(3500);
+export const Simulation = new FluidHandler(1000);
 Simulation.boundaries.push(new Boundary({
-	sgnDistance(r: Vector3) { return r.x + worldWidth; },
-	displacement(r: Vector3) { return new Vector3(r.x + worldWidth, 0, 0); },
-	restitution: 0.1,
-	adhesion: -100,
-}),
-new Boundary({
 	sgnDistance(r: Vector3) { return worldWidth - r.x; },
 	displacement(r: Vector3) { return new Vector3(r.x - worldWidth, 0, 0); },
 	restitution: 0.1,
-	adhesion: -100,
+	adhesion: 100,
+}),
+new Boundary({
+	sgnDistance(r: Vector3) { return r.x + worldWidth; },
+	displacement(r: Vector3) { return new Vector3(r.x + worldWidth, 0, 0); },
+	restitution: 0.1,
+	adhesion: 100,
 }),
 new Boundary({
 	sgnDistance(r: Vector3) { return r.y + worldWidth; },
